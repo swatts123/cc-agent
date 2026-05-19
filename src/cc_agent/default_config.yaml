@@ -1,0 +1,118 @@
+bedrock:
+  # Region for Bedrock calls. If null, falls back to AWS_REGION,
+  # AWS_DEFAULT_REGION, then the default profile's region.
+  region: null
+  model_id: anthropic.claude-sonnet-4-6-v1:0
+  fallback_model_id: anthropic.claude-haiku-4-5-v1:0
+  max_tokens: 8192
+  temperature: 0.2
+  timeout_seconds: 60
+
+agent:
+  # All paths support ~ expansion and are cross-platform.
+  workspace_root: ~/cc-agent-workspace
+  session_dir: ~/.cc-agent/sessions
+  # If null, the bundled default prompt is used.
+  system_prompt_file: null
+  context_token_budget: 180000
+
+aws:
+  # Documentation-only: the org-wide role ARN your CLI profiles assume.
+  # The agent doesn't use this directly — the CLI handles assume-role.
+  default_cross_account_role: arn:aws:iam::*:role/OrganizationAccountAccessRole
+
+  # Friendly name -> CLI profile name as it appears in ~/.aws/config.
+  # The agent passes --profile <profile> to every aws CLI call.
+  # "default" must exist; it points at whatever the host's default creds are.
+  profiles:
+    default:
+      profile: default
+      description: "Whatever the host's default credentials resolve to"
+    # Add more entries per account you want reachable, for example:
+    # security:
+    #   profile: org-security
+    #   description: "Security/audit account"
+    # prod:
+    #   profile: org-prod
+    #   description: "Production workloads"
+
+tools:
+  file:
+    enabled: true
+    max_read_bytes: 262144
+  bash:
+    enabled: true
+    # Path to a bash binary. If null, looks up `bash` on PATH —
+    # works for /bin/bash on Linux/macOS and Git Bash's bash.exe on Windows.
+    bash_path: null
+    timeout_seconds: 30
+    max_output_bytes: 1048576
+    binary_allowlist:
+      - ls
+      - cat
+      - head
+      - tail
+      - grep
+      - rg
+      - find
+      - git
+      - python
+      - python3
+      - pip
+      - jq
+      - awk
+      - sed
+      - sort
+      - uniq
+      - wc
+      - diff
+      - file
+      - stat
+      - which
+      - where
+      - echo
+      - pwd
+      - cd
+    command_denylist_patterns:
+      - "rm\\s+-rf\\s+[/~]"
+      - "mkfs"
+      - "dd\\s+if=.*of=/dev/"
+      - ":\\(\\)\\s*\\{\\s*:\\|:&\\s*\\}\\s*;\\s*:"
+      - "format\\s+[a-zA-Z]:"
+    require_approval_for_unlisted: true
+  aws_cli:
+    enabled: true
+    # Path to aws binary. If null, looks up `aws` on PATH.
+    aws_path: null
+    timeout_seconds: 60
+    auto_approve_verbs:
+      - get
+      - describe
+      - list
+      - head
+      - search
+      - lookup
+      - view
+      - show
+    blocked_operations:
+      - "iam:DeleteRole"
+      - "iam:DeleteUser"
+      - "iam:DeletePolicy"
+      - "organizations:LeaveOrganization"
+      - "kms:ScheduleKeyDeletion"
+      - "s3:DeleteBucket"
+
+audit:
+  local_path: ~/.cc-agent/audit.jsonl
+  cloudwatch:
+    enabled: false
+    log_group: /cc-agent/audit
+    region: null
+  redact_patterns:
+    - "AKIA[0-9A-Z]{16}"
+    - "(?i)aws_secret_access_key\\s*[:=]\\s*\\S+"
+    - "eyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{20,}"
+
+ui:
+  theme: dark
+  show_token_usage: true
