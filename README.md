@@ -18,15 +18,113 @@ No root install, no daemon, no systemd, no log groups to pre-create.
 
 ## Install
 
+Pick the section that matches your host.
+
+### Windows (Git Bash)
+
+Python on Windows is user-installed and not used by the OS, so plain `pip` works without a virtual environment.
+
 ```bash
+# from the cc-agent directory
 pip install .
+cc-agent --version
 ```
 
-Or from a release:
+If `pip` is missing, use `python -m pip install .`. If `python` opens the Microsoft Store, disable the `python.exe` and `python3.exe` aliases under **Settings → Apps → Advanced app settings → App execution aliases**.
+
+### Amazon Linux 2023
+
+AL2023 does not enforce PEP 668, so user-scoped `pip` works directly — but the default `python3` is 3.9, below cc-agent's required 3.12. Install 3.12 first:
 
 ```bash
-pip install cc-agent
+sudo dnf install -y python3.12 python3.12-pip git
+cd cc-agent
+python3.12 -m pip install --user .
+
+# Make sure ~/.local/bin is on PATH
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+cc-agent --version
 ```
+
+### Ubuntu (and other PEP 668 distros)
+
+Modern Ubuntu (and Debian) mark the system Python as externally managed, so plain `pip install .` will refuse with an `externally-managed-environment` error. The cleanest fix is **pipx**, which installs cc-agent into an isolated venv and links the `cc-agent` command onto `PATH` for you — equivalent to the Windows experience, but isolated.
+
+```bash
+sudo apt update
+sudo apt install -y pipx
+pipx ensurepath
+exec $SHELL -l                # reload PATH; or open a new shell
+
+cd cc-agent
+pipx install .
+cc-agent --version
+```
+
+Upgrades later: `pipx upgrade cc-agent`. Uninstall: `pipx uninstall cc-agent`.
+
+If you'll be hacking on the source and want editable installs with dev dependencies, use a venv instead:
+
+```bash
+sudo apt install -y python3.12 python3.12-venv python3-full
+python3.12 -m venv ~/.venvs/cc-agent
+source ~/.venvs/cc-agent/bin/activate
+pip install -e ".[dev]"
+cc-agent --version
+```
+
+Avoid `pip install --break-system-packages` on shared hosts — it works but collides with future `apt upgrade`s.
+
+## AWS CLI profile setup
+
+cc-agent passes `--profile <name>` to every `aws` call, so each entry under `aws.profiles` in the config must correspond to a real profile in `~/.aws/config`. A `default` profile must always exist.
+
+### EC2 instance with an attached instance profile
+
+You don't need static credentials. The CLI's default provider chain falls through to the instance metadata service automatically — you just need a `[default]` section to exist so the CLI doesn't error out when called with `--profile default`.
+
+```bash
+mkdir -p ~/.aws
+cat > ~/.aws/config <<'EOF'
+[default]
+region = us-east-1
+output = json
+EOF
+```
+
+Replace `us-east-1` with the region you want CLI calls to target by default (should match `bedrock.region` in your cc-agent config). Verify:
+
+```bash
+aws sts get-caller-identity --profile default
+```
+
+That should return the assumed-role ARN of the instance profile, e.g. `arn:aws:sts::123456789012:assumed-role/your-instance-role/i-0123abcd…`.
+
+If it errors about credentials, check that `~/.aws/credentials` either doesn't exist or doesn't have a `[default]` block with stale keys — anything in `~/.aws/credentials` takes precedence over IMDS.
+
+### Cross-account profiles from an instance profile
+
+For each AWS account you want the agent to reach, add a profile that assumes the target role using IMDS as the credential source:
+
+```ini
+[profile prod]
+role_arn = arn:aws:iam::222222222222:role/OrgReadWriteRole
+credential_source = Ec2InstanceMetadata
+region = us-east-1
+
+[profile security]
+role_arn = arn:aws:iam::111111111111:role/OrgReadWriteRole
+credential_source = Ec2InstanceMetadata
+region = us-east-1
+```
+
+The instance role needs `sts:AssumeRole` on each target role ARN, and each target role's trust policy must allow the instance role principal to assume it. Verify each one with `aws sts get-caller-identity --profile <name>` before adding it to cc-agent's config.
+
+### Laptop with static credentials or SSO
+
+For a laptop, configure profiles however you normally would (`aws configure`, `aws configure sso`, `aws-vault`, etc.) — cc-agent just calls the CLI, so anything that works for `aws sts get-caller-identity --profile <name>` works for the agent.
 
 ## First run
 
@@ -34,7 +132,7 @@ pip install cc-agent
 cc-agent
 ```
 
-On first run with no config, the CLI writes `~/.cc-agent/config.yaml` from the bundled defaults and exits with a "review this and run again" message. Edit the file (in particular, add account entries under `aws.profiles` if you want cross-account reach), then run `cc-agent` again to start the REPL.
+On first run with no config, the CLI writes `~/.cc-agent/config.yaml` from the bundled defaults and exits with a "review this and run again" message. Edit the file — at minimum, set `bedrock.region` and `bedrock.model_id`, and add entries under `aws.profiles` for the accounts you want to reach — then run `cc-agent` again to start the REPL.
 
 ## Slash commands inside the REPL
 
@@ -46,6 +144,7 @@ On first run with no config, the CLI writes `~/.cc-agent/config.yaml` from the b
 | `/reload` | Re-read the config file |
 | `/save` | Save the current transcript |
 | `/resume <uuid>` | Resume a saved session |
+| `/profiles` | List configured AWS profiles |
 | `/clear` | Start a fresh conversation |
 | `/quit` | Exit |
 
